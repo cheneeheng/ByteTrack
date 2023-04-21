@@ -161,8 +161,19 @@ class BYTETracker(object):
 
     # def update(self, output_results, img_info, img_size):
     def update(self, output_results: np.ndarray, *args, **kwargs):
+
+        for i, track in enumerate(self.tracked_stracks):
+            track.det_id = -1
+            self.tracked_stracks[i] = track
+        for i, track in enumerate(self.lost_stracks):
+            track.det_id = -1
+            self.lost_stracks[i] = track
+        for i, track in enumerate(self.removed_stracks):
+            track.det_id = -1
+            self.removed_stracks[i] = track
+
         self.frame_id += 1
-        activated_starcks = []
+        activated_stracks = []
         refind_stracks = []
         lost_stracks = []
         removed_stracks = []
@@ -178,6 +189,8 @@ class BYTETracker(object):
         # scale = min(img_size[0] / float(img_h), img_size[1] / float(img_w))
         # bboxes /= scale
 
+        det_ids = np.arange(output_results.shape[0])
+
         remain_inds = scores > self.args.track_thresh
         inds_low = scores > 0.1
         inds_high = scores < self.args.track_thresh
@@ -187,6 +200,9 @@ class BYTETracker(object):
         dets = bboxes[remain_inds]
         scores_keep = scores[remain_inds]
         scores_second = scores[inds_second]
+
+        _det_ids = det_ids[remain_inds]
+        __det_ids = det_ids[inds_second]
 
         if len(dets) > 0:
             '''Detections'''
@@ -213,16 +229,18 @@ class BYTETracker(object):
             dists = matching.fuse_score(dists, detections)
         matches, u_track, u_detection = matching.linear_assignment(
             dists, thresh=self.args.match_thresh)
-
         for itracked, idet in matches:
             track = strack_pool[itracked]
             det = detections[idet]
             if track.state == TrackState.Tracked:
-                track.update(detections[idet], self.frame_id, idet)
-                activated_starcks.append(track)
+                track.update(detections[idet], self.frame_id, _det_ids[idet])
+                activated_stracks.append(track)
             else:
-                track.re_activate(det, self.frame_id, idet, new_id=False)
+                track.re_activate(det, self.frame_id, _det_ids[idet],
+                                  new_id=False)
                 refind_stracks.append(track)
+        if matches.size > 0:
+            _det_ids = np.delete(_det_ids, matches[:, 1])
 
         ''' Step 3: Second association, with low score detection boxes'''
         # association the untrack to the low score detections
@@ -241,10 +259,11 @@ class BYTETracker(object):
             track = r_tracked_stracks[itracked]
             det = detections_second[idet]
             if track.state == TrackState.Tracked:
-                track.update(det, self.frame_id, idet)
-                activated_starcks.append(track)
+                track.update(det, self.frame_id, __det_ids[idet])
+                activated_stracks.append(track)
             else:
-                track.re_activate(det, self.frame_id, idet, new_id=False)
+                track.re_activate(det, self.frame_id, __det_ids[idet],
+                                  new_id=False)
                 refind_stracks.append(track)
 
         for it in u_track:
@@ -260,8 +279,12 @@ class BYTETracker(object):
             dists = matching.fuse_score(dists, detections)
         matches, u_unconfirmed, u_detection = matching.linear_assignment(dists, thresh=0.7)  # noqa
         for itracked, idet in matches:
-            unconfirmed[itracked].update(detections[idet], self.frame_id, idet)
-            activated_starcks.append(unconfirmed[itracked])
+            unconfirmed[itracked].update(detections[idet],
+                                         self.frame_id,
+                                         _det_ids[idet])
+            activated_stracks.append(unconfirmed[itracked])
+        if matches.size > 0:
+            _det_ids = np.delete(_det_ids, matches[:, 1])
         for it in u_unconfirmed:
             track = unconfirmed[it]
             track.mark_removed()
@@ -272,8 +295,8 @@ class BYTETracker(object):
             track = detections[inew]
             if track.score < self.det_thresh:
                 continue
-            track.activate(self.kalman_filter, self.frame_id, inew)
-            activated_starcks.append(track)
+            track.activate(self.kalman_filter, self.frame_id, _det_ids[inew])
+            activated_stracks.append(track)
         """ Step 5: Update state"""
         for track in self.lost_stracks:
             if self.frame_id - track.end_frame > self.max_time_lost:
@@ -283,7 +306,7 @@ class BYTETracker(object):
         # print('Ramained match {} s'.format(t4-t3))
 
         self.tracked_stracks = [t for t in self.tracked_stracks if t.state == TrackState.Tracked]  # noqa
-        self.tracked_stracks = joint_stracks(self.tracked_stracks, activated_starcks)  # noqa
+        self.tracked_stracks = joint_stracks(self.tracked_stracks, activated_stracks)  # noqa
         self.tracked_stracks = joint_stracks(self.tracked_stracks, refind_stracks)  # noqa
         self.lost_stracks = sub_stracks(self.lost_stracks, self.tracked_stracks)
         self.lost_stracks.extend(lost_stracks)
