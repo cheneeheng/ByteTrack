@@ -153,9 +153,10 @@ class BYTETracker(object):
 
         self.frame_id = 0
         self.args = args
-        # self.det_thresh = args.track_thresh
-        self.det_thresh = args.track_thresh + 0.1
-        self.buffer_size = int(frame_rate / 30.0 * args.track_buffer)
+        self.det_thresh = args.track_thresh
+        # self.det_thresh = args.track_thresh + 0.1
+        # self.buffer_size = int(frame_rate / 30.0 * args.track_buffer)
+        self.buffer_size = args.track_buffer
         self.max_time_lost = self.buffer_size
         self.kalman_filter = KalmanFilter()
 
@@ -254,7 +255,8 @@ class BYTETracker(object):
                              for i in u_track
                              if strack_pool[i].state == TrackState.Tracked]
         dists = matching.iou_distance(r_tracked_stracks, detections_second)
-        matches, u_track, u_detection_second = matching.linear_assignment(dists, thresh=0.5)  # noqa
+        matches, u_track, u_detection_second = matching.linear_assignment(
+            dists, thresh=self.args.match_thresh)
         for itracked, idet in matches:
             track = r_tracked_stracks[itracked]
             det = detections_second[idet]
@@ -277,7 +279,8 @@ class BYTETracker(object):
         dists = matching.iou_distance(unconfirmed, detections)
         if not self.args.mot20:
             dists = matching.fuse_score(dists, detections)
-        matches, u_unconfirmed, u_detection = matching.linear_assignment(dists, thresh=0.7)  # noqa
+        matches, u_unconfirmed, u_detection = matching.linear_assignment(
+            dists, thresh=self.args.match_thresh)
         for itracked, idet in matches:
             unconfirmed[itracked].update(detections[idet],
                                          self.frame_id,
